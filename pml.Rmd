@@ -1,0 +1,154 @@
+---
+title: "exercise manner prediction"
+author: "cfir rahimi"
+date: "December 27 2015"
+output: html_document
+---
+
+# Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks.
+In this research we will try to predict the exercise manner ("classe" field) by exploring the data with different models.
+
+# Packages, Libraries and Seed
+
+installing the relevent packages for the research, and set the seed for reproducibility.
+
+```{r ,echo=T, message=F, warning=F}
+library(caret)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+set.seed(1337)
+```
+
+# Data processing
+
+first, we want to read the data and do small asjustments if needed.
+
+```{r,echo=TRUE}
+# read both files and replace NA Strings with NA.
+training <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!",""))
+testing <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!",""))
+
+# check the dimentions of the sets.
+dim(training)
+dim(testing)
+
+# ingnoring the first 7 columns which do not contain measurments.
+training <- training[,-c(1:7)]
+testing <- testing[,-c(1:7)]
+
+# ignoring variables with very low variance.
+nzv <- nearZeroVar(training, saveMetrics = TRUE)
+training <- training[, !nzv$nzv]
+
+# ignoring variables with more than 80% NA values.
+nr <- nrow(training)
+empty_variables <- sapply(colnames(training), function(x) if(sum(is.na(training[, x])) > 0.80*nr) {
+  return(TRUE) } else { return(FALSE) })
+training <- training[, !empty_variables]
+
+# check the new dimentions of the data.
+dim(training)
+```
+
+# Exploratory Data analysis
+
+lets observe the data before we start the main analysis.
+
+```{r,echo=TRUE}
+plot(training$classe, main="histogram of the classe levels", col='light blue')
+```
+
+# main analysis
+
+first we would like to make two partitions from the training set to enable cross-validation.
+I chose to split it so the training sebset contain 70% of the training set the testing subset contain 30%
+because it seems that in this way both bias and variance stay medium.
+
+```{r,echo=TRUE}
+partition <- createDataPartition(y=training$classe, p=0.7, list=FALSE)
+subTraining <- training[partition, ] 
+subTesting <- training[-partition, ]
+```
+
+## first predicting model: Decision Tree
+
+In the first attempt we are using a Decision tree model, which should be good for classification problems.
+the model:
+
+```{r,echo=TRUE, cache=TRUE}
+fit_1 <- rpart(classe ~ ., data=subTraining, method="class")
+fancyRpartPlot(fit_1, sub = "")
+```
+
+lets see how well it is predicting our test data:
+
+```{r,echo=TRUE}
+predictions_1 <- predict(fit_1, subTesting, type = "class")
+c_1 <- confusionMatrix(predictions_1, subTesting$classe)
+c_1
+```
+
+we can see the accuracy = `r c_1$overall[[1]]` , good results, but lets try the random forest model and comapre the results.
+
+## second predicting model: Random Forests
+
+```{r,echo=TRUE, cache=TRUE}
+fit_2 <- randomForest(classe ~. , data=subTraining, ntree=100)
+```
+
+lets see how well it predicted our test data, we hope the results will be better:
+
+```{r,echo=TRUE}
+predictions_2 <- predict(fit_2, subTesting, type = "class")
+c_2 <- confusionMatrix(predictions_2, subTesting$classe)
+c_2
+```
+
+we got an amazing results, clearly the random forest model work much better, the accuracy here is: `r c_2$overall[[1]]`.
+
+### final model plots
+
+as we chose random forest as our final model we can see intresting plots on the model.
+the variance importance show us the main variable were chosen to split the data.
+
+```{r,echo=TRUE}
+varImpPlot(fit_2,main='Variable Importance : Random Forests',pch=16,col='black', cex = 0.8)
+```
+
+another interesting plot is to see how many trees needed to get the such amazing accuracy:
+
+```{r,echo=TRUE}
+plot(fit_2, main='Error vs No. of trees plot: Random Forests')
+```
+
+we can see from the plot the even 40 trees was enough.
+
+# creating files for submission:
+
+we need to run our model on the original test data:
+
+```{r,echo=TRUE}
+final_predictions <- predict(fit_2, testing, type = "class")
+```
+
+given function for creating the files on the final predictions:
+
+```{r,echo=TRUE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(final_predictions)
+```
+
+# conclusions
+
+we tried two kind of models for predicting the classe variable, we got an amazing accuracy with the random forests model.
